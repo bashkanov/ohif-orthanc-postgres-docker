@@ -9,30 +9,19 @@ import requests
 import logging
 import pathlib
 
-
+from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from split_file_reader import SplitFileReader
 from pyorthanc import Orthanc
 from requests.auth import HTTPBasicAuth
-
-
-logname = os.path.join(pathlib.Path(__file__).parent.resolve(), "unzip.log")
-
-file_handler = logging.FileHandler(filename=logname)
-stdout_handler = logging.StreamHandler(stream=sys.stdout)
-handlers = [file_handler, stdout_handler]
-
-logging.basicConfig(format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
-                    datefmt='%H:%M:%S',
-                    level=logging.INFO,
-                    handlers=handlers)
-
-logging.info("Running unzipping script...")
 
 
 def UploadBuffer(dicom, dicom_path, ignore_errors=True, verbose=True):
     auth = HTTPBasicAuth("demo", "demo")
     url = "http://localhost:8042"
     r = requests.post('%s/instances' % url, auth = auth, data = dicom)
+   
+    # orthanc = Orthanc('http://localhost:8042')
+    # orthanc.setup_credentials('demo', 'demo')  # If needed
 
     try:
         r.raise_for_status()
@@ -60,6 +49,8 @@ def select_right_pswd(zip_file, pswds):
         try:
             with tempfile.TemporaryDirectory() as tmp_dirpath:
                 zip_file.extract(member, path=tmp_dirpath, pwd=bytes(pswd, 'utf-8'))
+                logging.info(f"pswd \"{pswd}\" did pass...")
+
             return pswd
         except zipfile.BadZipFile:
             logging.warning(f"Bad zipfile: {member}")
@@ -90,8 +81,9 @@ def unzip_data(filepaths):
                     
                     
                     # TODO: unzip ALL!!
-                    if iterations > 103811:
-                        
+                    if True:
+                    # if iterations < 103812:
+                    # if iterations > 103811:                        
                         # skip directories
                         if not filename:
                             continue
@@ -118,39 +110,57 @@ def unzip_data(filepaths):
             return
         return 1
         
+        
+def get_main_args_eval():
+    parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
+    arg = parser.add_argument
+    arg("--dir", nargs='+', help="Folder(s) with zips...")
+    args = parser.parse_args()
+    return args
+
 
 if __name__=="__main__":
-    try:
-        # test_dicom_path =  "/hdd/drive1/oleksii/mrt_zips/Latest_unpacked/Teil 1/DICOM/00769d60"
-        # orthanc = Orthanc('http://localhost:8042')
-        # orthanc.setup_credentials('demo', 'demo')  # If needed
-
-        # filepaths = sorted(glob.glob("/hdd/drive1/oleksii/mrt_zips/2017/2017 Jan - April.zip*"))
-        # filepaths_0 = sorted(glob.glob("/hdd/drive1/oleksii/mrt_zips/2022/2022 Januar.zip*")) # with problems
-        # filepaths_1 = sorted(glob.glob("/hdd/drive1/oleksii/mrt_zips/2022/2022 September.zip*"))
-        # filepaths = sorted(glob.glob("/hdd/drive1/oleksii/mrt_zips/2018/2018 April - Juni.zip*"))
-
-        splitted_zips = glob.glob("/hdd/drive1/oleksii/mrt_zips/2022/*zip.001")
-        splitted_zips = [sorted(glob.glob(".".join([os.path.splitext(filename)[0], "*"]))) for filename in splitted_zips]
-            
-        non_splitted_zips = [[i] for i in sorted(glob.glob("/hdd/drive1/oleksii/mrt_zips/2022/*zip"))]
-        filepaths_archived = splitted_zips + non_splitted_zips
-
-        # filepaths_archived = [sorted(glob.glob("/hdd/drive1/oleksii/mrt_zips/2022/2022 Juni Juli andere Daten.zip.*"))]
+    args = get_main_args_eval()
+    print(args.dir)
+    
+    for path_dir in args.dir:
         
-        total = len(filepaths_archived)
-        logging.info(f"Total archives to process {len(filepaths_archived)}...")
-        for i, filepaths in enumerate(filepaths_archived):
-        # if True:
-            logging.info(f"{i + 1}/{total} Processing archive: {filepaths}")
-            status = unzip_data(filepaths)
-            if status:
-                logging.info(f"Success for {filepaths}")
-                for filepath in filepaths:
-                    logging.info(f"Moving {filepath} to /hdd/drive1/oleksii/mrt_zips_unzipped/")
-                    shutil.move(filepath, "/hdd/drive1/oleksii/mrt_zips_unzipped")
-            else:
-                logging.warning(f"Archives need to be double-checked for {filepaths}")
-    except Exception as e:
-        logging.error('Catch all:', exc_info=e)
+        logname = os.path.join(pathlib.Path(__file__).parent.resolve(), 
+                            f"unzip_{os.path.basename(path_dir)}.log")
+
+        file_handler = logging.FileHandler(filename=logname)
+        stdout_handler = logging.StreamHandler(stream=sys.stdout)
+        handlers = [file_handler, stdout_handler]
+
+        logging.basicConfig(format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
+                            datefmt='%H:%M:%S',
+                            level=logging.INFO,
+                            handlers=handlers)
+
+        logging.info("Running unzipping script...")
+        
+        try:
+            # get all splitted zips
+            splitted_zips = glob.glob(os.path.join(path_dir, "*zip.001"))
+            splitted_zips = [sorted(glob.glob(".".join([os.path.splitext(filename)[0], "*"]))) for filename in splitted_zips]
+
+            # get all normal zips
+            non_splitted_zips = [[i] for i in sorted(glob.glob(os.path.join(path_dir, "*zip")))]
+            filepaths_archived = splitted_zips + non_splitted_zips
+            
+            total = len(filepaths_archived)
+            logging.info(f"Total archives to process {len(filepaths_archived)}... {filepaths_archived}")
+            for i, filepaths in enumerate(filepaths_archived):
+            # if True:
+                logging.info(f"{i + 1}/{total} Processing archive: {filepaths}")
+                status = unzip_data(filepaths)
+                if status:
+                    logging.info(f"Success for {filepaths}")
+                    for filepath in filepaths:
+                        logging.info(f"Moving {filepath} to /hdd/drive1/oleksii/mrt_zips_unzipped/")
+                        shutil.move(filepath, "/hdd/drive1/oleksii/mrt_zips_unzipped")
+                else:
+                    logging.warning(f"Archives need to be double-checked for {filepaths}")
+        except Exception as e:
+            logging.error('Catch all:', exc_info=e)
 
