@@ -1,2 +1,3 @@
 orthanc_db/*
 pg_data/*
+*.log
