@@ -1,3 +1,11 @@
 orthanc_db/*
 pg_data/*
 *.log
+dcm2niix
+*.csv
+projectenv
+.env
+.ipynb_checkpoints
+.vscode
+*.pyc
+.txt
