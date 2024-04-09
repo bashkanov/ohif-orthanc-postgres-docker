@@ -8,5 +8,5 @@ projectenv
 .ipynb_checkpoints
 .vscode
 *.pyc
-.txt
-.xlsx
+*.txt
+*.xlsx
