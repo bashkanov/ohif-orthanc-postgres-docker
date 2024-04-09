@@ -1,3 +1,8 @@
+#!/usr/bin/env python
+
+# This script is used to import dicom files (zipped) into local orthanc server
+
+
 import os.path
 import glob 
 import sys
@@ -16,7 +21,7 @@ from requests.auth import HTTPBasicAuth
 
 
 def UploadBuffer(dicom, dicom_path, ignore_errors=True, verbose=True):
-    auth = HTTPBasicAuth("demo", "demo")
+    auth = HTTPBasicAuth("dev-user-alta", "SyTP&8JbKFx@a6R65^sE`Z$")
     url = "http://localhost:8042"
     r = requests.post('%s/instances' % url, auth = auth, data = dicom)
    
@@ -64,10 +69,11 @@ def unzip_data(filepaths):
     with SplitFileReader(filepaths) as sfr:   
         try: 
             with zipfile.ZipFile(sfr, mode='r') as zip_file:
-                pswd = select_right_pswd(zip_file, ["ALTAbielefeld2020", "ALTAbi2020!!", 'LucasALTA22!!'])
+                pswd = select_right_pswd(zip_file, ["ALTAbielefeld2020", "ALTAbi2020!!", 'LucasALTA22!!', 
+                                                    "ALTAbielefeld2021", "ALTAbi2021!!"])
 
                 if pswd is None:
-                    logging.warning("Apparantly Bad zipfile...")
+                    logging.warning("No psw did pass. Aborting import...")
                     return
                 zip_file.setpassword(pwd = bytes(pswd, 'utf-8'))
                 
@@ -79,11 +85,8 @@ def unzip_data(filepaths):
                     filename = os.path.basename(member)
                     iterations += 1
                     
-                    
-                    # TODO: unzip ALL!!
                     if True:
-                    # if iterations < 103812:
-                    # if iterations > 103811:                        
+                    
                         # skip directories
                         if not filename:
                             continue
@@ -158,6 +161,7 @@ if __name__=="__main__":
                     logging.info(f"Success for {filepaths}")
                     for filepath in filepaths:
                         logging.info(f"Moving {filepath} to /hdd/drive1/oleksii/mrt_zips_unzipped/")
+                        
                         shutil.move(filepath, "/hdd/drive1/oleksii/mrt_zips_unzipped")
                 else:
                     logging.warning(f"Archives need to be double-checked for {filepaths}")
