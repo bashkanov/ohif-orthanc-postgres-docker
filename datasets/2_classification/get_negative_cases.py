@@ -8,7 +8,8 @@
 import pandas as pd
 from pyorthanc import Patient
 from datetime import datetime
-from utils import get_orthanc_client
+from utils.utils import get_orthanc_client
+
 
 if __name__=="__main__":
     orthanc_client = get_orthanc_client()
