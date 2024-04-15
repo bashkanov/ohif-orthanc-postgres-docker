@@ -25,6 +25,8 @@ from datetime import datetime
 from pyorthanc import Orthanc
 from collections import defaultdict
 
+from utils.utils import sane_filename
+
 
 dcm2niix_executable = "./dcm2niix/build/bin/dcm2niix"  
 current_sequence_map = pd.read_csv("meta_data_lesion/sequence_mapping_13056_studies_20240124.csv", sep=';')
@@ -142,7 +144,7 @@ def get_nrrd_from_instances_list(orthanc_client, referenced_instances, target_di
             with open(os.path.join(tmpdirname, instance.id_), 'wb') as f: 
                 f.write(instance_bytes)
     
-        convert_dicom(target_dir=target_dir, filename=f"{orthanc_series_id}-{modality_suff}", to_convert=tmpdirname, convert_to="nrrd")
+        convert_dicom(target_dir=target_dir, filename=sane_filename(f"{orthanc_series_id}-{modality_suff}"), to_convert=tmpdirname, convert_to="nrrd")
 
 
 def get_meta_with_correct_alta_ids():

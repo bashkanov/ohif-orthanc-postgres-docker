@@ -27,6 +27,7 @@ from pyorthanc import Orthanc
 from collections import defaultdict
 from pyorthanc import Orthanc, Study, Series
 
+from utils.utils import sane_filename
 
 dcm2niix_executable = "./dcm2niix/build/bin/dcm2niix"  
 current_sequence_map = pd.read_csv("meta_data_lesion/sequence_mapping_13056_studies_20240124.csv", sep=';')
@@ -143,7 +144,7 @@ def get_nrrd_from_instances_list(orthanc_client,
     except HTTPError as err:
         print(f"could not retrieve the referenced dicoms {orthanc_series_id}, {err}")
     
-    if skip_existing and os.path.exists(os.path.join(target_dir, f"{orthanc_series_id}-{modality_suff}.nrrd")) :
+    if skip_existing and os.path.exists(os.path.join(target_dir, sane_filename(f"{orthanc_series_id}-{modality_suff}.nrrd"))) :
         print("Skipping, already exists...")
         return
     
@@ -153,7 +154,7 @@ def get_nrrd_from_instances_list(orthanc_client,
             with open(os.path.join(tmpdirname, instance.id_), 'wb') as f: 
                 f.write(instance_bytes)
     
-        convert_dicom(target_dir=target_dir, filename=f"{orthanc_series_id}-{modality_suff}", to_convert=tmpdirname, convert_to="nrrd")
+        convert_dicom(target_dir=target_dir, filename=sane_filename(f"{orthanc_series_id}-{modality_suff}"), to_convert=tmpdirname, convert_to="nrrd")
 
 
 def get_meta_with_correct_alta_ids():

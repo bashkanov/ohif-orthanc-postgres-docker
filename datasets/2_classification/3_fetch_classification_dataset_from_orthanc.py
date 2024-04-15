@@ -15,7 +15,7 @@ import subprocess as sp
 
 from httpx import HTTPError
 from collections import defaultdict
-from utils.utils import get_orthanc_client
+from utils.utils import get_orthanc_client,  sane_filename
 
 
 dcm2niix_executable = "./dcm2niix/build/bin/dcm2niix"  
@@ -129,7 +129,7 @@ def get_nrrd_from_instances_list(orthanc_client, referenced_instances, target_di
             with open(os.path.join(tmpdirname, instance.id_), 'wb') as f: 
                 f.write(instance_bytes)
     
-        convert_dicom(target_dir=target_dir, filename=f"{orthanc_series_id}-{modality_suff}", to_convert=tmpdirname, convert_to="nrrd")
+        convert_dicom(target_dir=target_dir, filename=sane_filename(f"{orthanc_series_id}-{modality_suff}"), to_convert=tmpdirname, convert_to="nrrd")
 
 
 def get_meta_with_correct_alta_ids():
