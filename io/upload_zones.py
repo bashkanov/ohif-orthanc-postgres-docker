@@ -1,3 +1,4 @@
+import pandas as pd
 
 from base64 import b64encode
 from glob import glob
@@ -117,43 +118,63 @@ def get_studies_to_upload():
     return study_oiud   
 
 
+def get_data_for_first_batch():
+    # get first batch with non-segmented lesion cases 
+    classification_dataset = pd.read_csv("datasets/2_classification/prostate_class_dataset_demography_final_psa_vol_20240418.csv", sep=";")
+    zonal_dataset = pd.read_csv("/home/oleksii/projects/ohif-orthanc-postgres-docker/datasets/1_zonal_segmentation/zone_dataset_1260_20240129.csv",  sep=";")
+    lesion_dataset = pd.read_csv("/home/oleksii/projects/ohif-orthanc-postgres-docker/datasets/0_lesion/meta_data_lesion/lesion_dataset_1941_20240126_OB.csv", sep=";")
+    
+    never_segmented_zones = classification_dataset[~classification_dataset['study_orthanc_id'].isin(zonal_dataset['study_orthanc_id'])]
+    priority_zones = never_segmented_zones[never_segmented_zones['study_orthanc_id'].isin(lesion_dataset['study_orthanc_id'])]
+    studies_to_upload = priority_zones['study_orthanc_id'].to_list()
+    return studies_to_upload
+    
+
 if __name__ == "__main__":
     
     max_retries = 4
     retry_sleep = 2
     orthanc_client = get_orthanc_client()
 
-    # upload dicom
+    # study_oid, series_oid, seg_path = "0a0da388-22d102ff-4fc4ae54-24e395d6-81fc2151", "65c996e0-e73a4923-4829ad80-0d923261-d7c7694c", "/data/oleksii/Prostate-Classification-Datasets-NRRDS/ALTA-Classification-Dataset-Segmentations-alt/0a0da388-22d102ff-4fc4ae54-24e395d6-81fc2151/65c996e0-e73a4923-4829ad80-0d923261-d7c7694c-SegmentationAI.seg.nrrd"
     studies = get_studies_to_upload()
+    
+    
+    # upload dicom
+    studies = get_data_for_first_batch()
+    sequence_map = pd.read_csv("/home/oleksii/projects/ohif-orthanc-postgres-docker/datasets/2_classification/clinical_metainfo/sequence_map_classicifation_20240410.csv", sep=";")
+    
     # for study_oid, series_oid, seg_path in tqdm(studies[:5]):
+    print(len(studies))
+    sequence_map = sequence_map[sequence_map['study_orthanc_id'].isin(studies)]
+    
+    for row in tqdm(sequence_map.to_dict('records')[:5]):
+        series_oid = row['t2w_tra_id']
         
-    study_oid, series_oid, seg_path = "0a0da388-22d102ff-4fc4ae54-24e395d6-81fc2151", "65c996e0-e73a4923-4829ad80-0d923261-d7c7694c", "/data/oleksii/Prostate-Classification-Datasets-NRRDS/ALTA-Classification-Dataset-Segmentations-alt/0a0da388-22d102ff-4fc4ae54-24e395d6-81fc2151/65c996e0-e73a4923-4829ad80-0d923261-d7c7694c-SegmentationAI.seg.nrrd"
+        if series_oid is not None:
+            instances = orthanc_client.get_series_id(series_oid)['Instances']
+            instances_bar = tqdm(instances)
+            for instance_id in instances_bar:
+                # print(instance_id, flush=True)
+                dicom = Instance(instance_id, orthanc_client).get_pydicom()
+                ds = anonymize_single_dicom(dicom)
 
-    if True:
-        # instances = orthanc_client.get_series_id(series_oid)['Instances']
-        # instances_bar = tqdm(instances)
-        # for instance_id in instances_bar:
-        #     # print(instance_id, flush=True)
-        #     dicom = Instance(instance_id, orthanc_client).get_pydicom()
-        #     ds = anonymize_single_dicom(dicom)
+                with DicomBytesIO() as fp:
+                    fp.is_implicit_VR = ds.is_implicit_VR
+                    fp.is_little_endian = ds.is_little_endian
+                    write_dataset(fp, ds)
+                    dicom_bites = fp.parent.getvalue()
+                    retries = 0
+                    while retries < max_retries:
+                        try:                    
 
-
-        #     with DicomBytesIO() as fp:
-        #         fp.is_implicit_VR = ds.is_implicit_VR
-        #         fp.is_little_endian = ds.is_little_endian
-        #         write_dataset(fp, ds)
-        #         dicom_bites = fp.parent.getvalue()
-        #         retries = 0
-        #         while retries < max_retries:
-        #             try:                    
-
-        #                 upload_dicom_file(dicom_bites)
-        #                 retries = max_retries
-        #                 # fp.seek(0) 
-        #             except httpx.TimeoutException:
-        #                 print(f"Request timed out. Retrying ({retries + 1}/{max_retries})...")
-        #                 retries += 1
-        #                 time.sleep(retry_sleep)
-        
-        study_info = orthanc_client.get_studies_id(study_oid)
-        upload_dicom_segmentation(seg_path, studyInstanceUID=study_info['MainDicomTags']['StudyInstanceUID'])
+                            upload_dicom_file(dicom_bites)
+                            retries = max_retries
+                            # fp.seek(0) 
+                        except httpx.TimeoutException:
+                            print(f"Request timed out. Retrying ({retries + 1}/{max_retries})...")
+                            retries += 1
+                            time.sleep(retry_sleep)
+            
+            # study_info = orthanc_client.get_studies_id(study_oid)
+            # upload_dicom_segmentation(seg_path, studyInstanceUID=study_info['MainDicomTags']['StudyInstanceUID'])
