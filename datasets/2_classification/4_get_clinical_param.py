@@ -74,8 +74,9 @@ if __name__=="__main__":
     fetched_data_m.loc[fetched_data_m['class'] == 'High Grade Pin', 'class_order'] = 2
     fetched_data_m.loc[fetched_data_m['class'] == 'CI', 'class_order'] = 3
     fetched_data_m.loc[fetched_data_m['class'] == 'Cancer', 'class_order'] = 4
-    fetched_data_m.loc[fetched_data_m['class'] == 'Cancer+CI', 'class_order'] = 5
-    fetched_data_m.loc[fetched_data_m['class'] == 'Cancer+CI+HGP', 'class_order'] = 6
+    fetched_data_m.loc[fetched_data_m['class'] == 'Cancer+HGP', 'class_order'] = 5
+    fetched_data_m.loc[fetched_data_m['class'] == 'Cancer+CI', 'class_order'] = 6
+    fetched_data_m.loc[fetched_data_m['class'] == 'Cancer+CI+HGP', 'class_order'] = 7
     
     
     # Fetch demographic information     

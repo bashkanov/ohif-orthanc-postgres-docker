@@ -111,10 +111,11 @@ def get_files(path: str) -> List:
     return candidates
 
 
-def get_studies_to_upload():
-    segmentations = glob("/data/oleksii/Prostate-Classification-Datasets-NRRDS/ALTA-Classification-Dataset-Segmentations/*/*.seg.nrrd")
+def get_segmentations_to_upload():
+    segmentations = glob("/data/oleksii/Prostate-Classification-Datasets-NRRDS/ALTA-Classification-Dataset-orient-Segmentations/*/*.seg.nrrd")
     study_oiud = [(seg_path.split('/')[-2], seg_path.split('/')[-1], seg_path) for seg_path in segmentations]
-    study_oiud = [(study, series.replace('-SegmentationAI.seg.nrrd', ''), seg_path) for study, series, seg_path in study_oiud]
+    study_oiud = [{"study_orthanc_id": study, "series_orthanc_id": series.replace('-SegmentationAI.seg.nrrd', ''), "seg_path": seg_path} 
+                  for study, series, seg_path in study_oiud]
     return study_oiud   
 
 
@@ -136,21 +137,27 @@ if __name__ == "__main__":
     retry_sleep = 2
     orthanc_client = get_orthanc_client()
 
-    # study_oid, series_oid, seg_path = "0a0da388-22d102ff-4fc4ae54-24e395d6-81fc2151", "65c996e0-e73a4923-4829ad80-0d923261-d7c7694c", "/data/oleksii/Prostate-Classification-Datasets-NRRDS/ALTA-Classification-Dataset-Segmentations-alt/0a0da388-22d102ff-4fc4ae54-24e395d6-81fc2151/65c996e0-e73a4923-4829ad80-0d923261-d7c7694c-SegmentationAI.seg.nrrd"
-    studies = get_studies_to_upload()
     
-    
-    # upload dicom
-    studies = get_data_for_first_batch()
+    studies_first_batch = get_data_for_first_batch()
     sequence_map = pd.read_csv("/home/oleksii/projects/ohif-orthanc-postgres-docker/datasets/2_classification/clinical_metainfo/sequence_map_classicifation_20240410.csv", sep=";")
     
-    # for study_oid, series_oid, seg_path in tqdm(studies[:5]):
-    print(len(studies))
-    sequence_map = sequence_map[sequence_map['study_orthanc_id'].isin(studies)]
+    # study_oid, series_oid, seg_path = "0a0da388-22d102ff-4fc4ae54-24e395d6-81fc2151", "65c996e0-e73a4923-4829ad80-0d923261-d7c7694c", "/data/oleksii/Prostate-Classification-Datasets-NRRDS/ALTA-Classification-Dataset-Segmentations-alt/0a0da388-22d102ff-4fc4ae54-24e395d6-81fc2151/65c996e0-e73a4923-4829ad80-0d923261-d7c7694c-SegmentationAI.seg.nrrd"
     
-    for row in tqdm(sequence_map.to_dict('records')[:5]):
-        series_oid = row['t2w_tra_id']
-        
+    segmentations_with_series = get_segmentations_to_upload()
+    segmentations_with_series_df = pd.DataFrame(segmentations_with_series)
+    segmentations_with_series_df = segmentations_with_series_df[segmentations_with_series_df['study_orthanc_id'].isin(studies_first_batch)]
+    
+    # upload segmentations
+    # for row in tqdm(segmentations_with_series_df.to_dict('records')[5:]):
+    #     study_info = orthanc_client.get_studies_id(row['study_orthanc_id'])
+    #     # print(study_info['MainDicomTags']['StudyInstanceUID'])
+    #     upload_dicom_segmentation(row['seg_path'], studyInstanceUID=study_info['MainDicomTags']['StudyInstanceUID'])
+
+    sequence_map = sequence_map[sequence_map['study_orthanc_id'].isin(segmentations_with_series_df['study_orthanc_id'])]
+    
+    for row in tqdm(sequence_map.to_dict('records')[:]):
+        # series_oid = row['t2w_tra_id']
+        series_oid = row['t2w_sag_id']        
         if series_oid is not None:
             instances = orthanc_client.get_series_id(series_oid)['Instances']
             instances_bar = tqdm(instances)
@@ -175,6 +182,3 @@ if __name__ == "__main__":
                             print(f"Request timed out. Retrying ({retries + 1}/{max_retries})...")
                             retries += 1
                             time.sleep(retry_sleep)
-            
-            # study_info = orthanc_client.get_studies_id(study_oid)
-            # upload_dicom_segmentation(seg_path, studyInstanceUID=study_info['MainDicomTags']['StudyInstanceUID'])

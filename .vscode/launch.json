@@ -5,14 +5,63 @@
     "version": "0.2.0",
     "configurations": [
 
+        
+
         {
             "name": "Python: Current File",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "program": "${file}",
-            "args": ["--dir", "/hdd/drive1/oleksii/mrt_zips_unzipped/incomplete",],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": { "PYTHONPATH": "${workspaceRoot}"}
+
+        },
+        
+        {
+            "name": "Remote upload",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "remote_file_upload.py",
+            "args": [
+                "--username", "dev-user",
+                "--password", "^t^8@dG5&^G@7qSTohh5pWx*MNQ3!!",
+                "--uri", "https://alta-ai.com/server-admin/uploadDicom",
+                // "--async_upload", "False",
+                // "--batch_size", "/hdd/drive1/oleksii/mrt_zips/s3_bucket",
+                // "--threads", "/hdd/drive1/oleksii/mrt_zips/s3_bucket",
+                
+        
+        ],
             "console": "integratedTerminal",
             "justMyCode": false
-        }
+        },
+        
+        {
+            "name": "Orthanc upload",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "orthanc_upload.py",
+            "args": [
+                "--data", "upload_batch_20230727.csv",
+        
+        ],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },    
+        {
+            "name": "Orthanc import",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "orthanc_import.py",
+            "args": [
+                "--dir", "/hdd/drive1/oleksii/aws",
+        
+        ],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        }   
+
+
     ]
 }

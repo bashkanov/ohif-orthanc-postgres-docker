@@ -33,6 +33,10 @@ if __name__=="__main__":
     # studied_to_map = ['752f842e-c7f224d4-1611d32a-33225378-b80226f0']     # external case multiple dwi
     # studied_to_map = ['a5fbdd93-94340496-663b98fb-028d8adb-1f94c594']     # external multiple slice thickness
     
+    
+    # studied_to_map = ['517713ea-c2f36caa-f7cd39a7-e311a844-112cf711']     # somehow missing 
+    studied_to_map = ['db4b6807-2ad902ba-03e2cad6-e142e78f-dc6f2d07']     # somehow missing 
+    
     d = []
     for study_id in tqdm.tqdm(studied_to_map):
         study = Study(study_id, orthanc_client)
@@ -71,5 +75,5 @@ if __name__=="__main__":
         d.append(selected_series)
         
     dataset = pd.DataFrame.from_dict(d)
-    dataset.to_csv(f"meta_data_lesion/sequence_mapping_{len(studied_to_map)}_studies_{today}.csv", sep=";", index=False)
+    # dataset.to_csv(f"meta_data_lesion/sequence_mapping_{len(studied_to_map)}_studies_{today}.csv", sep=";", index=False)
     print(dataset)

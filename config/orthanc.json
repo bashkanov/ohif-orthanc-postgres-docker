@@ -160,7 +160,7 @@
       // The list of the registered users. Because Orthanc uses HTTP
     // Basic Authentication, the passwords are stored as plain text.
     "RegisteredUsers" : {
-      "demo" : "demo"
+      "dev-user-alta" : "SyTP&8JbKFx@a6R65^sE`Z$"
     },
   
   
