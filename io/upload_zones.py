@@ -10,6 +10,7 @@ import numpy as np
 from pydicom.filewriter import write_data_element, write_dataset
 import httpx
 import time
+import numpy as np
 
 
 from pyorthanc import Orthanc, Instance, Patient, Study
@@ -148,37 +149,38 @@ if __name__ == "__main__":
     segmentations_with_series_df = segmentations_with_series_df[segmentations_with_series_df['study_orthanc_id'].isin(studies_first_batch)]
     
     # upload segmentations
-    # for row in tqdm(segmentations_with_series_df.to_dict('records')[5:]):
-    #     study_info = orthanc_client.get_studies_id(row['study_orthanc_id'])
-    #     # print(study_info['MainDicomTags']['StudyInstanceUID'])
-    #     upload_dicom_segmentation(row['seg_path'], studyInstanceUID=study_info['MainDicomTags']['StudyInstanceUID'])
+    for row in tqdm(segmentations_with_series_df.to_dict('records')[:]):
+        study_info = orthanc_client.get_studies_id(row['study_orthanc_id'])
+        # print(study_info['MainDicomTags']['StudyInstanceUID'])
+        upload_dicom_segmentation(row['seg_path'], studyInstanceUID=study_info['MainDicomTags']['StudyInstanceUID'])
 
-    sequence_map = sequence_map[sequence_map['study_orthanc_id'].isin(segmentations_with_series_df['study_orthanc_id'])]
-    
-    for row in tqdm(sequence_map.to_dict('records')[:]):
-        # series_oid = row['t2w_tra_id']
-        series_oid = row['t2w_sag_id']        
-        if series_oid is not None:
-            instances = orthanc_client.get_series_id(series_oid)['Instances']
-            instances_bar = tqdm(instances)
-            for instance_id in instances_bar:
-                # print(instance_id, flush=True)
-                dicom = Instance(instance_id, orthanc_client).get_pydicom()
-                ds = anonymize_single_dicom(dicom)
+    # sequence_map = sequence_map[sequence_map['study_orthanc_id'].isin(segmentations_with_series_df['study_orthanc_id'])]
+    # for row in tqdm(sequence_map.to_dict('records')[43:]):
+    #     # series_oid = row['t2w_tra_id']
+    #     series_oid = row['t2w_sag_id']        
+    #     if not isinstance(series_oid, float):
+    #         instances = orthanc_client.get_series_id(series_oid)['Instances']
+    #         instances_bar = tqdm(instances)
+    #         for instance_id in instances_bar:
+    #             # print(instance_id, flush=True)
+    #             dicom = Instance(instance_id, orthanc_client).get_pydicom()
+    #             ds = anonymize_single_dicom(dicom)
 
-                with DicomBytesIO() as fp:
-                    fp.is_implicit_VR = ds.is_implicit_VR
-                    fp.is_little_endian = ds.is_little_endian
-                    write_dataset(fp, ds)
-                    dicom_bites = fp.parent.getvalue()
-                    retries = 0
-                    while retries < max_retries:
-                        try:                    
+    #             with DicomBytesIO() as fp:
+    #                 fp.is_implicit_VR = ds.is_implicit_VR
+    #                 fp.is_little_endian = ds.is_little_endian
+    #                 write_dataset(fp, ds)
+    #                 dicom_bites = fp.parent.getvalue()
+    #                 retries = 0
+    #                 while retries < max_retries:
+    #                     try:                    
 
-                            upload_dicom_file(dicom_bites)
-                            retries = max_retries
-                            # fp.seek(0) 
-                        except httpx.TimeoutException:
-                            print(f"Request timed out. Retrying ({retries + 1}/{max_retries})...")
-                            retries += 1
-                            time.sleep(retry_sleep)
+    #                         upload_dicom_file(dicom_bites)
+    #                         retries = max_retries
+    #                         # fp.seek(0) 
+    #                     except httpx.TimeoutException:
+    #                         print(f"Request timed out. Retrying ({retries + 1}/{max_retries})...")
+    #                         retries += 1
+    #                         time.sleep(retry_sleep)
+    #     else:
+    #         print("Skipping...")

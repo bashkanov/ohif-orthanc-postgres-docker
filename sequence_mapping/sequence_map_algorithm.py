@@ -215,7 +215,6 @@ def process_dicom_meta_info(dicom_findings: DataFrame):
             "dwi_cor_sd": get_series_itemised_data(cor, 'SeriesDescription'),
         }
 
-        
     def find_valid_adc(x, manufacturer=None):
                         
         def get_all_candidates_adc(series_description, image_type):
