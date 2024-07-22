@@ -105,6 +105,8 @@ def fetch_url(url: str, data: Optional[dict] = None, headers: Optional[dict] = N
             logger.error(f"An error occurred: {req_err}")
             break
         else:
+            logger.info(f"Seems okay. ")
+
             # If no exceptions were raised, return the response
             return response
     return None   
@@ -140,8 +142,8 @@ def upload_dicom_file(data: bytes):
     response = fetch_url(dicom_url, data, headers={"Authorization": auth()})
 
 
-def write_dicoms(sequence_map, orthanc_client, target_dir):
-    os.makedirs(target_dir, exist_ok=True)
+def upload_dicoms(sequence_map, orthanc_client):
+    # os.makedirs(target_dir, exist_ok=True)
     l = []
     for row in tqdm(sequence_map.to_dict('records')[:]):
         study_info = orthanc_client.get_studies_id(row['study_orthanc_id'])
@@ -155,8 +157,7 @@ def write_dicoms(sequence_map, orthanc_client, target_dir):
         l.append(d)
         print("study:", study_instanceUID)
         
-        with memory_tempfile.TemporaryDirectory() as temp_dir:
-            
+        with memory_tempfile.MemoryTempfile().TemporaryDirectory() as temp_dir:
             for seq in ['t2w_tra_id', 't2w_sag_id', 'dwi_tra_id', 'adc_tra_id']:
                 series_oid = row[seq]
                 print("Writing: ", series_oid)
@@ -170,64 +171,8 @@ def write_dicoms(sequence_map, orthanc_client, target_dir):
                         #  Create some temporary filename
                         filename = os.path.join(temp_dir, f"{instance_id}.dcm")
                         ds.save_as(filename)
-                        
                         upload_dicom_file(read_file(filename))
-                    
-                    # with DicomBytesIO() as fp:
-                    #     fp.is_implicit_VR = ds.is_implicit_VR
-                    #     fp.is_little_endian = ds.is_little_endian
-                    #     write_dataset(fp, ds)
-                    #     dicom_bites = fp.parent.getvalue()
-                        
-                    #     with open(filename, "wb") as binary_dicom_file:
-                    #         binary_dicom_file.write(dicom_bites)
-    
 
-def upload_dicoms(sequence_map, orthanc_client, max_retries = 4, retry_sleep = 2): 
-    l = []
-    for row in tqdm(sequence_map.to_dict('records')[:]):
-        study_info = orthanc_client.get_studies_id(row['study_orthanc_id'])
-        study_instanceUID = study_info['MainDicomTags']['StudyInstanceUID']
-        
-        study_orthanc_id = row['study_orthanc_id']
-        d = {
-            "study_orthanc_id": study_orthanc_id, 
-            "StudyInstanceUID": study_instanceUID,
-        }
-        l.append(d)
-        print("study:", study_instanceUID)
-        
-        for seq in ['t2w_tra_id', 't2w_sag_id', 'dwi_tra_id', 'adc_tra_id']:
-            series_oid = row[seq]
-            print("uploading: ", series_oid)
-            if not isinstance(series_oid, float):
-                instances = orthanc_client.get_series_id(series_oid)['Instances']
-                instances_bar = tqdm(instances)
-                for instance_id in instances_bar:
-                    # print(instance_id, flush=True)
-                    dicom = Instance(instance_id, orthanc_client).get_pydicom()
-                    ds = anonymize_single_dicom(dicom)
-
-                    with DicomBytesIO() as fp:
-                        fp.is_implicit_VR = ds.is_implicit_VR
-                        fp.is_little_endian = ds.is_little_endian
-                        write_dataset(fp, ds)
-                        dicom_bites = fp.parent.getvalue()
-                        retries = 0
-                        while retries < max_retries:
-                            try:                    
-                                upload_dicom_file(dicom_bites)
-                                retries = max_retries
-                                # fp.seek(0) 
-                            except httpx.TimeoutException:
-                                print(f"Request timed out. Retrying ({retries + 1}/{max_retries})...")
-                                retries += 1
-                                time.sleep(retry_sleep)        
-            else:
-                print("Skipping...")
-
-    df = pd.DataFrame(l)
-    return df
 
 
 def get_files(path: str) -> List:
@@ -269,10 +214,9 @@ def get_data_for_first_batch():
     
     # upload cases where 502 error has occured...
     # missing_hms = pd.read_csv("/home/oleksii/projects/ohif-orthanc-postgres-docker/datasets/lesion/missing_hms.csv",  sep=",")
-    missing_segs = pd.read_csv("/home/oleksii/projects/ohif-orthanc-postgres-docker/datasets/lesion/missing_segs.csv",  sep=",")
-    
+    missing_segs = pd.read_csv("/home/oleksii/projects/ohif-orthanc-postgres-docker/datasets/lesion/missing_dicoms.csv",  sep=",")
+
     lesion_dataset = lesion_dataset[lesion_dataset['study_orthanc_id'].isin(missing_segs['OrthancID'])]
-    # lesion_dataset = lesion_dataset[lesion_dataset['study_orthanc_id'].isin(missing_hms['OrthancID']) | lesion_dataset['study_orthanc_id'].isin(missing_segs['OrthancID'])]
     studies_to_upload = lesion_dataset['study_orthanc_id'].to_list()
     return studies_to_upload
     
@@ -283,9 +227,14 @@ if __name__ == "__main__":
     sequence_map = pd.read_csv("/home/oleksii/projects/ohif-orthanc-postgres-docker/sequence_mapping/sequence_mapping_13024_studies_20240115.csv", sep=";")        
 
     segmentations_with_series = get_data_for_first_batch()
-    l = get_segmentations_with_softmax(segmentations_with_series)
+    segmentations_with_series_tmp = sequence_map[sequence_map['study_orthanc_id'].isin(segmentations_with_series)][5:]
+    segms = get_segmentations_with_softmax(segmentations_with_series_tmp['study_orthanc_id'].to_list())
+    
+    # upload dicoms
+    # sequence_map = sequence_map[sequence_map['study_orthanc_id'].isin(segmentations_with_series)]
+    upload_dicoms(segmentations_with_series_tmp, orthanc_client)
 
-    for data in tqdm(l[:]):
+    for data in tqdm(segms[:]):
         study_info = orthanc_client.get_studies_id(data["study_orthanc_id"] )
         logging.info(f"Uploading case | {study_info['MainDicomTags']['StudyInstanceUID']} | {data['study_orthanc_id']} |")
         
@@ -300,17 +249,7 @@ if __name__ == "__main__":
         else:
             logging.info("Skipping lesion...")
         
-        # if data['softmax']:
-        #     upload_heatmap(data['softmax'], studyInstanceUID=study_info['MainDicomTags']['StudyInstanceUID'])
-        # else: 
-        #     logging.info("Skipping softmax...")
-    
-
-    # upload dicoms
-    # sequence_map = sequence_map[sequence_map['study_orthanc_id'].isin(segmentations_with_series)]
-    # upload_dicoms(sequence_map, orthanc_client)
-
-    # write a study locally
-    # sequence_map = sequence_map[sequence_map['study_orthanc_id'].isin(["256b2af9-77028b74-a08fc55a-92a06eb3-9d01cf4e"])]
-    # target_dir = "/home/oleksii/projects/ohif-orthanc-postgres-docker/io/tmp_dicom_buffer"
-    # write_dicoms(sequence_map, orthanc_client, target_dir)
+        if data['softmax']:
+            upload_heatmap(data['softmax'], studyInstanceUID=study_info['MainDicomTags']['StudyInstanceUID'])
+        else: 
+            logging.info("Skipping softmax...")
