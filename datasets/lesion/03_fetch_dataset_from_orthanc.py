@@ -18,19 +18,22 @@ import pandas as pd
 import SimpleITK as sitk 
 import subprocess as sp
 
-from pyorthanc import Orthanc, Study
 
+from typing import List
 from httpx import HTTPError
 from datetime import datetime
-from pyorthanc import Orthanc
+from pyorthanc import Orthanc, Study
 from collections import defaultdict
 
-from utils.utils import sane_filename
+from utils.utils import sane_filename, convert_dicom, get_orthanc_client
+
 
 
 dcm2niix_executable = "./dcm2niix/build/bin/dcm2niix"  
-current_sequence_map = pd.read_csv("meta_data_lesion/sequence_mapping_13056_studies_20240124.csv", sep=';')
 
+# current_sequence_map = pd.read_csv("meta_data_lesion/sequence_mapping_13056_studies_20240124.csv", sep=';')
+current_sequence_map = pd.read_csv("/home/oleksii/projects/ohif-orthanc-postgres-docker/sequence_mapping/sequence_mapping_13681_studies_20240807.csv",
+                                   sep=';')
                         
 def get_oid_from_uid(uid):
     study_candidates = orthanc_client.post_tools_lookup(data=uid)
@@ -40,11 +43,11 @@ def get_oid_from_uid(uid):
     return None
                         
 
-def get_orthanc_client():
-    # Initialize orthanc client
-    orthanc_client = Orthanc('http://localhost:8042')
-    orthanc_client.setup_credentials('dev-user-alta', 'SyTP&8JbKFx@a6R65^sE`Z$') 
-    return orthanc_client
+# def get_orthanc_client():
+#     # Initialize orthanc client
+#     orthanc_client = Orthanc('http://localhost:8042')
+#     orthanc_client.setup_credentials('dev-user-alta', 'SyTP&8JbKFx@a6R65^sE`Z$') 
+#     return orthanc_client
 
 
 def group_dwi_by_bval(instances):
@@ -99,36 +102,7 @@ def get_orthanc_study_id(patient_id: str, study_instance_uid: str):
     orthanc_id = pad_string_with_dashes(orthanc_id, distance=8)
     return orthanc_id
 
-    
-def convert_dicom(target_dir, filename, to_convert, convert_to='nifti_gz', method='dcm2niix', force=False):
-    os.makedirs(target_dir, exist_ok=True)
 
-    if convert_to == 'nrrd':
-        print('Conversion from DICOM to NRRD...')
-        if method=='dcm2niix':
-            cmd = (f"{dcm2niix_executable} -o {target_dir} -f {filename} -w 1 -e y {to_convert}")
-        else:
-            raise Exception('Not recognized {} method to convert from DICOM to NRRD.'.format(method))
-    elif convert_to == 'nifti_gz':
-        print('\nConversion from DICOM to NIFTI_GZ...')
-        ext = '.nii.gz'
-        if method == 'dcm2niix':
-            if force:
-                cmd = (f"{dcm2niix_executable} -o {target_dir} -f {filename} -w 1 -z y -p n -m y {to_convert}")
-            else:
-                cmd = (f"{dcm2niix_executable} -o {target_dir} -f {filename} -w 1 -z y -p n {to_convert}")
-        else:
-            raise Exception('Not recognized {} method to convert from DICOM to NIFTI_GZ.'.format(method))
-    else:
-        raise NotImplementedError('The conversion from DICOM to {} has not been implemented yet.'
-                                  .format(convert_to))
-    try:
-        print(cmd)
-        sp.check_output(cmd, shell=True)
-        print('Image successfully converted!\n')
-    except:
-        print('Conversion failed. Scan will be ignored.\n')
-        
 
 def get_nrrd_from_instances_list(orthanc_client, referenced_instances, target_dir, orthanc_series_id, modality_suff):
     try: 
@@ -203,7 +177,6 @@ def get_alta_lesion_ids():
 
 def dicom_seg_to_nrrd(df, target_dir_root):
     # applicacle to alta-ai generated segmentations
-    
     target_dir_root_split = target_dir_root.split('/')
     if not target_dir_root_split[-1]:
         target_dir_root_split = target_dir_root_split[:-1] # trunkate '/' if available
@@ -322,8 +295,32 @@ def retrieve_missing_cases_from_first_batch():
 
 def retrieve_alta_ai_segmetnation_cases():
     # segments_info = pd.read_csv("/data/oleksii/alta-ai-orthanc-backup/2023_08_15_full/segments.csv")
-    target_dir_root = "/data/oleksii/Prostate-Lesion-Datasets-NRRDS/ALTA-Lesion-Dataset-alta_ai-final/"
-    lesions = glob.glob("/data/oleksii/alta-ai.com/alta-ai-orthanc-backup/2023_08_15_full/prostate_lesion/ProcessingState.PROCESSED/*/seg.dcm")
+    target_dir_root = "/data/oleksii/Prostate-Lesion-Datasets-NRRDS/ALTA-Lesion-Dataset-alta_ai-export20240814-seg-IDS-fresh/"
+    # lesions = glob.glob("/data/oleksii/alta-ai.com/alta-ai-orthanc-backup/2023_08_15_full/prostate_lesion/ProcessingState.PROCESSED/*/seg.dcm")
+    # lesions = glob.glob("/data/oleksii/alta-ai.com/alta-ai-orthanc-backup/export20240809/prostate_lesion/ProcessingState.PERFECT/*/seg.dcm")
+    lesions = glob.glob("/data/oleksii/alta-ai.com/alta-ai-orthanc-backup/export20240814/prostate_lesion/ProcessingState.PERFECT/*/seg.dcm")
+    lesions_exported = glob.glob("/data/oleksii/alta-ai.com/alta-ai-orthanc-backup/export20240809/prostate_lesion/ProcessingState.PERFECT/*/seg.dcm")
+    
+
+    def get_diff_paths(list1: List[str], list2: List[str]) -> List[str]:
+        # Extract directory names from the full paths
+        dirs1 = set(os.path.basename(os.path.dirname(path)) for path in list1)
+        dirs2 = set(os.path.basename(os.path.dirname(path)) for path in list2)
+
+        # Find directories that are in list1 but not in list2
+        diff_dirs = dirs1 - dirs2
+
+        # Filter the original list1 to only include paths from the diff directories
+        diff_paths = [path for path in list1 if os.path.basename(os.path.dirname(path)) in diff_dirs]
+
+        return diff_paths
+    
+    lesions = get_diff_paths(lesions, lesions_exported)
+    
+    # df_optional_study_components = pd.read_csv("/data/oleksii/alta-ai.com/alta-ai-orthanc-backup/export20240809/mongo_csv_dump/aggregatedData/optional_study_components.csv")
+    df_segmentation = pd.read_csv("/data/oleksii/alta-ai.com/alta-ai-orthanc-backup/export20240814/mongo_csv_dump/aggregatedData/segmentation.csv")
+    df_study = pd.read_csv("/data/oleksii/alta-ai.com/alta-ai-orthanc-backup/export20240814/mongo_csv_dump/aggregatedData/study.csv")
+    healthy = df_study[df_study['diagnoses'] == "{'prostateCancer': {'diagnosis': 'healthy'}}"]
     
     # get the StudyInstanceUID from dicom segmemtatinos
     meta_info = []
@@ -347,6 +344,8 @@ def retrieve_alta_ai_segmetnation_cases():
                           })
         
     alta_ai_lesions = pd.DataFrame(meta_info)
+    # alta_ai_lesions = alta_ai_lesions[~alta_ai_lesions["StudyInstanceUID"].isin(healthy['studyInstanceUID'])]
+    # alta_ai_lesions = alta_ai_lesions[alta_ai_lesions["StudyInstanceUID"].isin(healthy['studyInstanceUID'])]
     
     for i, row in alta_ai_lesions.iterrows():
         oid = get_oid_from_uid(row['StudyInstanceUID'])
@@ -354,23 +353,25 @@ def retrieve_alta_ai_segmetnation_cases():
         alta_ai_lesions.loc[i, 'study_orthanc_id'] = oid
     
     alta_ai_lesions_seq = pd.merge(alta_ai_lesions, current_sequence_map, on='study_orthanc_id', how='left')
-    alta_ai_lesions_seq = alta_ai_lesions_seq[323:]
     # skip check missing t2w modalities
-    # retrieve_studies_from_othanc(df=alta_ai_lesions_seq, target_dir_root=target_dir_root, use_ref_t2w=True, include_segmentation=True)
+    retrieve_studies_from_othanc(df=alta_ai_lesions_seq, target_dir_root=target_dir_root, use_ref_t2w=True, include_segmentation=True)
     dicom_seg_to_nrrd(df=alta_ai_lesions_seq, target_dir_root=target_dir_root)
-
+    alta_ai_lesions_seq.to_csv("/data/oleksii/Prostate-Lesion-Datasets-NRRDS/ALTA-Lesion-Dataset-alta_ai-export20240814-seg-IDS-fresh.csv", sep=";", index=False)
+    
 
 if __name__=='__main__':
     # test conntection
-    # orthanc_client = get_orthanc_client()
+    orthanc_client = get_orthanc_client()
     # patient_ids = orthanc_client.get_patients()
     # len(patient_ids)
     # retrieve_exitsting_cases()
     # retrieve_missing_cases_from_first_batch()
     # retrieve_neg_cases()
-    # retrieve_alta_ai_segmetnation_cases()
     
-    seg_path = glob.glob("/data/oleksii/Prostate-Lesion-Datasets-NRRDS/ALTA-Lesion-Dataset-fist-batch-external-seg/0f3b3042-cfef7f84-dda03ae9-4a8ed643-6bcccb9d/*seg.nrrd")
-    seg = sitk.ReadImage(seg_path[0])
-    print(seg.GetNumberOfComponentsPerPixel())
-    print()
+    # use "gunzip */*/*.gz" command 
+    retrieve_alta_ai_segmetnation_cases()
+    
+    # seg_path = glob.glob("/data/oleksii/Prostate-Lesion-Datasets-NRRDS/ALTA-Lesion-Dataset-fist-batch-external-seg/0f3b3042-cfef7f84-dda03ae9-4a8ed643-6bcccb9d/*seg.nrrd")
+    # seg = sitk.ReadImage(seg_path[0])
+    # print(seg.GetNumberOfComponentsPerPixel())
+    # print()
