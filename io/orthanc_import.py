@@ -160,9 +160,9 @@ if __name__=="__main__":
                 if status:
                     logging.info(f"Success for {filepaths}")
                     for filepath in filepaths:
-                        logging.info(f"Moving {filepath} to /hdd/drive1/oleksii/mrt_zips_unzipped/")
+                        logging.info(f"Moving {filepath} to /hdd/drive1/oleksii/mrt_zips_unzipped_new/")
                         
-                        shutil.move(filepath, "/hdd/drive1/oleksii/mrt_zips_unzipped")
+                        shutil.move(filepath, "/hdd/drive1/oleksii/mrt_zips_unzipped_new")
                 else:
                     logging.warning(f"Archives need to be double-checked for {filepaths}")
         except Exception as e:

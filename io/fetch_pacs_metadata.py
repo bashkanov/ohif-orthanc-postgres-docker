@@ -56,4 +56,4 @@ if __name__ == "__main__":
 
     metadata_df = pd.DataFrame(metadata)
     now = datetime.now().strftime("%Y%m%d")
-    metadata_df.to_csv(f'pacs_metadata/meta_pacs_{len(study_identifiers)}_{now}.csv', index=False, sep=";")
+    metadata_df.to_csv(f'meta_pacs_{len(study_identifiers)}_{now}.csv', index=False, sep=";")

@@ -2,10 +2,36 @@ import os
 import hashlib
 import subprocess as sp
 import re
+import memory_tempfile
+
 from pyorthanc import Orthanc, Study
 from collections import defaultdict
+from httpx import HTTPError
+import gzip
+import pydicom
 
 dcm2niix_executable = "./dcm2niix/build/bin/dcm2niix"  
+current_sequence_map_path = "/home/oleksii/projects/ohif-orthanc-postgres-docker/sequence_mapping/sequence_mapping_13681_studies_20240807.csv"
+
+
+def open_zipped_dicom(file_path):
+    # Check if the file exists
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"The file {file_path} does not exist.")
+
+    # Check if the file has the correct extension
+    if not file_path.endswith('.dcm.gz'):
+        raise ValueError("The file must have a .dcm.gz extension.")
+
+    # Open the gzipped file and decompress it
+    with gzip.open(file_path, 'rb') as gzipped_file:
+        # Read the decompressed data
+        decompressed_data = gzipped_file.read()
+
+    # Use pydicom to read the DICOM data from the decompressed content
+    dicom_data = pydicom.dcmread(pydicom.filebase.DicomBytesIO(decompressed_data))
+
+    return dicom_data
 
 
 def get_orthanc_client():
@@ -106,5 +132,47 @@ def convert_dicom(target_dir, filename, to_convert, convert_to='nifti_gz', metho
         print(cmd)
         sp.check_output(cmd, shell=True)
         print('Image successfully converted!\n')
+        return True
     except:
         print('Conversion failed. Scan will be ignored.\n')
+        
+        
+# Function that retrieves the referenced series of the segmentation file
+def get_referenced_series(orthanc_client, dicom_dataset, return_series_identifier_only=True):
+    patientID = dicom_dataset[(0x0010, 0x0020)].value
+    seriesInstanceUID = dicom_dataset[(0x0020, 0x000d)].value
+    refSeriesInstanceUID = dicom_dataset[(0x0008,0x1115)][0][(0x0020, 0x000e)].value
+    series_identifier = get_orthanc_series_id(patientID, seriesInstanceUID, refSeriesInstanceUID)
+    
+    if return_series_identifier_only:
+        return series_identifier, None, None
+    
+    try: 
+        series_info = orthanc_client.get_series_id(series_identifier)
+        referenced_instances = series_info['Instances']
+        files = [orthanc_client.get_instances_id_file(instance_id) for instance_id in referenced_instances]
+        
+    except HTTPError as err:
+#         if err == 404:
+        print(f"could not retrieve the referenced dicoms {series_identifier}")
+        return None, None, None                   
+        
+    print(f"Retrieved {len(files)} istances..")
+    return series_identifier, referenced_instances, files
+
+
+def get_nrrd_from_instances_list(orthanc_client, referenced_instances, target_dir, orthanc_series_id, modality_suff):
+    try: 
+        instances = [orthanc_client.get_instances_id_file(instance.id_) for instance in referenced_instances]
+        # print(f"Retrieved {len(instances)} instances...")
+    
+    except HTTPError as err:
+        print(f"could not retrieve the referenced dicoms {orthanc_series_id}, {err}")
+    
+    with memory_tempfile.MemoryTempfile().TemporaryDirectory() as tmpdirname:
+        # print('created temporary directory', tmpdirname)
+        for instance_bytes, instance in zip(instances, referenced_instances):
+            with open(os.path.join(tmpdirname, instance.id_), 'wb') as f: 
+                f.write(instance_bytes)
+    
+        convert_dicom(target_dir=target_dir, filename=sane_filename(f"{orthanc_series_id}-{modality_suff}"), to_convert=tmpdirname, convert_to="nrrd")

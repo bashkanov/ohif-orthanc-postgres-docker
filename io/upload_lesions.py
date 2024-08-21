@@ -7,6 +7,7 @@ import os
 import requests
 import time
 import memory_tempfile
+import datetime
 
 from base64 import b64encode
 from glob import glob
@@ -21,9 +22,30 @@ from urllib3.exceptions import ProtocolError, MaxRetryError
 
 from utils.utils import get_orthanc_client, sane_filename
 
+class PrefixFilter(logging.Filter):
+    def filter(self, record):
+        # Return False to ignore the log message
+        return not record.getMessage().startswith("INFO:httpx:HTTP")
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Create a console handler
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.DEBUG) 
+
+    
+# Add the prefix filter to the console handler
+prefix_filter = PrefixFilter()
+console_handler.addFilter(prefix_filter)
+
+# Create a formatter and set it for the console handler
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(formatter)
+
+# Add the handler to the logger
+logger.addHandler(console_handler)
 
 
 def anonymize_single_dicom(dicom):
@@ -105,10 +127,9 @@ def fetch_url(url: str, data: Optional[dict] = None, headers: Optional[dict] = N
             logger.error(f"An error occurred: {req_err}")
             break
         else:
-            logger.info(f"Seems okay. ")
-
+            # logger.info(f"Seems okay. ")
             # If no exceptions were raised, return the response
-            return response
+            return "Ok"
     return None   
 
 
@@ -117,6 +138,7 @@ def upload_dicom_segmentaton(file_path: str, studyInstanceUID: str, segmentation
     assert segmentationType in ['zone', 'lesion']
     dicom_url = f"https://alta-ai.com/server/external/uploadSegmentation?studyInstanceUID={studyInstanceUID}&compressed=false&segmentationType={segmentationType}&algorithmType=automatic"
     response = fetch_url(dicom_url, read_file(file_path), headers={"Authorization": auth()})
+    return response
 
 
 def upload_heatmap(file_path: str, studyInstanceUID: str):
@@ -135,17 +157,19 @@ def upload_heatmap(file_path: str, studyInstanceUID: str):
     heatmap_bytes = read_file(file_path)
     request_bytes = b"".join([body_struct, sep, heatmap_bytes])
     response = fetch_url(dicom_url, request_bytes, headers={"Authorization": auth()})
+    return response
 
 
 def upload_dicom_file(data: bytes):
     dicom_url = "https://alta-ai.com/server/external/uploadDicom?compressed=false"
     response = fetch_url(dicom_url, data, headers={"Authorization": auth()})
+    return response
 
 
 def upload_dicoms(sequence_map, orthanc_client):
     # os.makedirs(target_dir, exist_ok=True)
     l = []
-    for row in tqdm(sequence_map.to_dict('records')[:]):
+    for row in tqdm(sequence_map.to_dict('records')[762:]):
         study_info = orthanc_client.get_studies_id(row['study_orthanc_id'])
         study_instanceUID = study_info['MainDicomTags']['StudyInstanceUID']
         
@@ -159,20 +183,25 @@ def upload_dicoms(sequence_map, orthanc_client):
         
         with memory_tempfile.MemoryTempfile().TemporaryDirectory() as temp_dir:
             for seq in ['t2w_tra_id', 't2w_sag_id', 'dwi_tra_id', 'adc_tra_id']:
+            # for seq in ['t2w_tra_id', 't2w_sag_id', 'adc_tr/a_id']:
                 series_oid = row[seq]
-                print("Writing: ", series_oid)
+                # print("Writing: ", series_oid)
                 if not isinstance(series_oid, float):
-                    instances = orthanc_client.get_series_id(series_oid)['Instances']
-                    instances_bar = tqdm(instances)
-                    for instance_id in instances_bar:
-                        # print(instance_id, flush=True)
-                        dicom = Instance(instance_id, orthanc_client).get_pydicom()
-                        ds = anonymize_single_dicom(dicom)
-                        #  Create some temporary filename
-                        filename = os.path.join(temp_dir, f"{instance_id}.dcm")
-                        ds.save_as(filename)
-                        upload_dicom_file(read_file(filename))
-
+                    if "," in series_oid:
+                        series_oids = series_oid.split(",")
+                    else:
+                        series_oids = [series_oid]
+                    for series_oid in series_oids:
+                        instances = orthanc_client.get_series_id(series_oid)['Instances']
+                        instances_bar = tqdm(instances)
+                        for instance_id in instances_bar:
+                            # print(instance_id, flush=True)
+                            dicom = Instance(instance_id, orthanc_client).get_pydicom()
+                            ds = anonymize_single_dicom(dicom)
+                            #  Create some temporary filename
+                            filename = os.path.join(temp_dir, f"{instance_id}.dcm")
+                            ds.save_as(filename)
+                            upload_dicom_file(read_file(filename))
 
 
 def get_files(path: str) -> List:
@@ -189,10 +218,10 @@ def get_segmentations_to_upload():
     return study_oiud   
 
 
-def get_segmentations_with_softmax(studies):
+def get_segmentations_with_softmax(path):
     l = []
-    for study_orthanc_id in studies:
-        dir_name = os.path.join("/data/oleksii/Prostate-Lesion-Datasets-NRRDS/ALTA-Lesion-Dataset-batch-anno-Segmentation-AI/", study_orthanc_id)
+    for study_orthanc_id in os.listdir(path):
+        dir_name = os.path.join(path, study_orthanc_id)
         softmax = glob(os.path.join(dir_name, "*AI_softmax_0_lesion.nrrd"))
         lesion = glob(os.path.join(dir_name, "*SegmentationAI_lesion.seg.nrrd"))
         zone = glob(os.path.join(dir_name, "*SegmentationAI_zone.seg.nrrd"))
@@ -203,53 +232,60 @@ def get_segmentations_with_softmax(studies):
             "lesion": lesion[0] if lesion else None,
             "zone": zone[0] if zone else None,
         })
-        
-    return l
-
-
-def get_data_for_first_batch():
-    # get first batch with non-segmented lesion cases 
-    lesion_dataset = pd.read_csv("/home/oleksii/projects/ohif-orthanc-postgres-docker/datasets/lesion/annotate_batch_01_701_seq_map.csv",  sep=";")
-    # studies_to_upload = lesion_dataset['study_orthanc_id'].to_list()
     
-    # upload cases where 502 error has occured...
-    # missing_hms = pd.read_csv("/home/oleksii/projects/ohif-orthanc-postgres-docker/datasets/lesion/missing_hms.csv",  sep=",")
-    missing_segs = pd.read_csv("/home/oleksii/projects/ohif-orthanc-postgres-docker/datasets/lesion/missing_dicoms.csv",  sep=",")
+    df = pd.DataFrame(l)
+    return df
 
-    lesion_dataset = lesion_dataset[lesion_dataset['study_orthanc_id'].isin(missing_segs['OrthancID'])]
-    studies_to_upload = lesion_dataset['study_orthanc_id'].to_list()
-    return studies_to_upload
-    
 
 if __name__ == "__main__":
     
     orthanc_client = get_orthanc_client()
-    sequence_map = pd.read_csv("/home/oleksii/projects/ohif-orthanc-postgres-docker/sequence_mapping/sequence_mapping_13024_studies_20240115.csv", sep=";")        
-
-    segmentations_with_series = get_data_for_first_batch()
-    segmentations_with_series_tmp = sequence_map[sequence_map['study_orthanc_id'].isin(segmentations_with_series)][5:]
-    segms = get_segmentations_with_softmax(segmentations_with_series_tmp['study_orthanc_id'].to_list())
+    sequence_map = pd.read_csv("/home/oleksii/projects/ohif-orthanc-postgres-docker/sequence_mapping/sequence_mapping_13681_studies_20240807.csv", sep=";")        
+    # predice_cases = "/data/oleksii/Prostate-Lesion-Datasets-NRRDS/ALTA-Lesion-Dataset-batch-anno-Segmentation-AI/"
+    predice_cases = "/data/oleksii/Prostate-Lesion-Datasets-NRRDS/ALTA-Lesion-Dataset-batch-anno-20240819-AI-pred/"
+    segms = get_segmentations_with_softmax(predice_cases)
     
     # upload dicoms
-    # sequence_map = sequence_map[sequence_map['study_orthanc_id'].isin(segmentations_with_series)]
-    upload_dicoms(segmentations_with_series_tmp, orthanc_client)
-
-    for data in tqdm(segms[:]):
-        study_info = orthanc_client.get_studies_id(data["study_orthanc_id"] )
-        logging.info(f"Uploading case | {study_info['MainDicomTags']['StudyInstanceUID']} | {data['study_orthanc_id']} |")
+    sequence_map_filtered = sequence_map[sequence_map['study_orthanc_id'].isin(segms['study_orthanc_id'])]
+    
+    # to preserve order
+    segms_tmp = pd.merge(sequence_map_filtered, segms, how="left", on='study_orthanc_id')
+    
+    upload_dicoms(sequence_map_filtered, orthanc_client)
+    # segms_tmp = segms_tmp.head(726)
+    # failed = []
+    # for i, data in tqdm(segms_tmp.iterrows()):
+    #     study_info = orthanc_client.get_studies_id(data["study_orthanc_id"])
+    #     logging.info(f"Uploading case | {study_info['MainDicomTags']['StudyInstanceUID']} | {data['study_orthanc_id']} |")
         
         # upload segmentations  
-        if data['zone']:
-            upload_dicom_segmentaton(data['zone'], studyInstanceUID=study_info['MainDicomTags']['StudyInstanceUID'], segmentationType="zone")
-        else:
-            logging.info("Skipping zone...")
+        # if data['zone']:
+        #     time.sleep(1)
+        #     response = upload_dicom_segmentaton(data['zone'], studyInstanceUID=study_info['MainDicomTags']['StudyInstanceUID'], segmentationType="zone")
+        #     if response is None:
+        #         failed.append({"StudyInstanceUID": study_info['MainDicomTags']['StudyInstanceUID'], "study_orthanc_id": data['study_orthanc_id'], "type": "zone"})
             
-        if data['lesion']:
-            upload_dicom_segmentaton(data['lesion'], studyInstanceUID=study_info['MainDicomTags']['StudyInstanceUID'],  segmentationType="lesion")
-        else:
-            logging.info("Skipping lesion...")
+        # else:
+        #     logging.info("Skipping zone...")
         
-        if data['softmax']:
-            upload_heatmap(data['softmax'], studyInstanceUID=study_info['MainDicomTags']['StudyInstanceUID'])
-        else: 
-            logging.info("Skipping softmax...")
+    #     if data['lesion']:
+    #         response = upload_dicom_segmentaton(data['lesion'], studyInstanceUID=study_info['MainDicomTags']['StudyInstanceUID'],  segmentationType="lesion")
+    #         if response is None:
+    #             failed.append({"StudyInstanceUID": study_info['MainDicomTags']['StudyInstanceUID'], "study_orthanc_id": data['study_orthanc_id'], "type": "lesion"})
+            
+    #         time.sleep(1)
+    #     else:
+    #         logging.info("Skipping lesion...")
+        
+    #     if data['softmax']:
+    #         response = upload_heatmap(data['softmax'], studyInstanceUID=study_info['MainDicomTags']['StudyInstanceUID'])
+    #         if response is None:
+    #             failed.append({"StudyInstanceUID": study_info['MainDicomTags']['StudyInstanceUID'], "study_orthanc_id": data['study_orthanc_id'], "type": "heatmap"})
+                
+    #         time.sleep(1)
+    #     else: 
+    #         logging.info("Skipping softmax...")
+        
+    # df = pd.DataFrame(failed)
+    # timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    # df.to_csv(f"failed_{timestamp}.csv", sep=';', index=False)

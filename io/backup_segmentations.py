@@ -159,7 +159,6 @@ def merge_dataset(dataset: pydicom.Dataset) -> pydicom.Dataset:
 def gzip_dicom(input_path, output_path):
     with open(input_path, "rb") as f_in, gzip.open(output_path, "wb") as f_out:
         shutil.copyfileobj(f_in, f_out)
-
     os.remove(input_path)
 
 
