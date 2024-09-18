@@ -250,13 +250,18 @@ if __name__ == "__main__":
     
     # to preserve order
     segms_tmp = pd.merge(sequence_map_filtered, segms, how="left", on='study_orthanc_id')
-    
-    upload_dicoms(sequence_map_filtered, orthanc_client)
-    # segms_tmp = segms_tmp.head(726)
-    # failed = []
-    # for i, data in tqdm(segms_tmp.iterrows()):
-    #     study_info = orthanc_client.get_studies_id(data["study_orthanc_id"])
-    #     logging.info(f"Uploading case | {study_info['MainDicomTags']['StudyInstanceUID']} | {data['study_orthanc_id']} |")
+
+    failed_cases = pd.read_csv("/home/oleksii/projects/ohif-orthanc-postgres-docker/failed_20240821114725_0.csv", sep=";")
+    # failed_cases = failed_cases[failed_cases['type'] == 'heatmap']
+    failed_cases = failed_cases[failed_cases['type'] == 'lesion']
+    segms_tmp = segms_tmp[segms_tmp['study_orthanc_id'].isin(failed_cases['study_orthanc_id'])]
+    print()
+    # upload_dicoms(sequence_map_filtered, orthanc_client)
+
+    failed = []
+    for i, data in tqdm(segms_tmp.iterrows()):
+        study_info = orthanc_client.get_studies_id(data["study_orthanc_id"])
+        logging.info(f"Uploading case | {study_info['MainDicomTags']['StudyInstanceUID']} | {data['study_orthanc_id']} |")
         
         # upload segmentations  
         # if data['zone']:
@@ -264,28 +269,27 @@ if __name__ == "__main__":
         #     response = upload_dicom_segmentaton(data['zone'], studyInstanceUID=study_info['MainDicomTags']['StudyInstanceUID'], segmentationType="zone")
         #     if response is None:
         #         failed.append({"StudyInstanceUID": study_info['MainDicomTags']['StudyInstanceUID'], "study_orthanc_id": data['study_orthanc_id'], "type": "zone"})
-            
         # else:
-        #     logging.info("Skipping zone...")
+            # logging.info("Skipping zone...")
         
-    #     if data['lesion']:
-    #         response = upload_dicom_segmentaton(data['lesion'], studyInstanceUID=study_info['MainDicomTags']['StudyInstanceUID'],  segmentationType="lesion")
-    #         if response is None:
-    #             failed.append({"StudyInstanceUID": study_info['MainDicomTags']['StudyInstanceUID'], "study_orthanc_id": data['study_orthanc_id'], "type": "lesion"})
+        if data['lesion']:
+            response = upload_dicom_segmentaton(data['lesion'], studyInstanceUID=study_info['MainDicomTags']['StudyInstanceUID'],  segmentationType="lesion")
+            if response is None:
+                failed.append({"StudyInstanceUID": study_info['MainDicomTags']['StudyInstanceUID'], "study_orthanc_id": data['study_orthanc_id'], "type": "lesion"})
             
-    #         time.sleep(1)
-    #     else:
-    #         logging.info("Skipping lesion...")
+            time.sleep(1)
+        else:
+            logging.info("Skipping lesion...")
         
-    #     if data['softmax']:
-    #         response = upload_heatmap(data['softmax'], studyInstanceUID=study_info['MainDicomTags']['StudyInstanceUID'])
-    #         if response is None:
-    #             failed.append({"StudyInstanceUID": study_info['MainDicomTags']['StudyInstanceUID'], "study_orthanc_id": data['study_orthanc_id'], "type": "heatmap"})
+        # if data['softmax']:
+        #     response = upload_heatmap(data['softmax'], studyInstanceUID=study_info['MainDicomTags']['StudyInstanceUID'])
+        #     if response is None:
+        #         failed.append({"StudyInstanceUID": study_info['MainDicomTags']['StudyInstanceUID'], "study_orthanc_id": data['study_orthanc_id'], "type": "heatmap"})
                 
-    #         time.sleep(1)
-    #     else: 
-    #         logging.info("Skipping softmax...")
+        #     time.sleep(1)
+        # else: 
+        #     logging.info("Skipping softmax...")
         
-    # df = pd.DataFrame(failed)
-    # timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    # df.to_csv(f"failed_{timestamp}.csv", sep=';', index=False)
+    df = pd.DataFrame(failed)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    df.to_csv(os.path.join(os.path.dirname(__file__), f"failed_{timestamp}.csv"), sep=';', index=False)
