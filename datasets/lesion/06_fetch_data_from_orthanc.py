@@ -66,7 +66,8 @@ def retrieve_study_from_othanc(row, target_dir_root, use_ref_t2w=False, include_
 
 
 def main(df, target_dir_root):
-    df = df.head(1000)
+    # df = df.head(1000)
+    df = df.iloc[1000:]
     
     for i, (_, row) in enumerate(df.iterrows()):  
         print(f"processing {i}/{len(df)}...")
@@ -75,7 +76,7 @@ def main(df, target_dir_root):
 
 # ------ 
 def retrieve_exitsting_cases():
-    target_dir_root = "/data/oleksii/Prostate-Lesion-Datasets-NRRDS/ALTA-Lesion-Dataset-batch-anno-20240819/"    
+    target_dir_root = "/data/oleksii/Prostate-Lesion-Datasets-NRRDS/ALTA-Lesion-Dataset-batch-anno-20240819-1340/"          
     sequence_selected_path = "/home/oleksii/projects/ohif-orthanc-postgres-docker/datasets/lesion/meta_data_lesion/Batch 2 alta AI.xlsx"
     # sequence_selected = pd.read_csv(sequence_selected_path, sep=';')
     sequence_selected = pd.read_excel(sequence_selected_path)

@@ -93,46 +93,84 @@ def auth():
     return f"Basic {credentials}"
 
 
-def fetch_url(url: str, data: Optional[dict] = None, headers: Optional[dict] = None, retries: int = 3, backoff_factor: float = 0.3) -> Any:    
+# def fetch_url(url: str, data: Optional[dict] = None, headers: Optional[dict] = None, retries: int = 3, backoff_factor: float = 0.3) -> Any:    
         
-    for attempt in range(retries):
-        try:
-            response = requests.post(
-                url=url,
-                data=data,
-                headers=headers,
-            )
-            response.raise_for_status()  # Raise an exception for HTTP error responses
-        except (Timeout, ConnectionError, ConnectionResetError) as trans_err:
-            logger.error(f"Transient error occurred: {trans_err}.")
-            if trans_err.response is not None:
-                logger.error(f"Status code: {trans_err.response.status_code}")
-            wait_time = backoff_factor * (2 ** attempt)  # Exponential backoff
-            logger.info(f"Retrying in {wait_time} seconds...")
-            time.sleep(wait_time)
-        except HTTPError as http_err:
-            logger.error(f"HTTP error occurred: {http_err}")
-            # Handle specific status codes if needed
-            if http_err.response is not None:
+#     for attempt in range(retries):
+#         try:
+#             response = requests.post(
+#                 url=url,
+#                 data=data,
+#                 headers=headers,
+#             )
+#             response.raise_for_status()  # Raise an exception for HTTP error responses
+#         except (Timeout, ConnectionError, ConnectionResetError) as trans_err:
+#             logger.error(f"Transient error occurred: {trans_err}.")
+#             if trans_err.response is not None:
+#                 logger.error(f"Status code: {trans_err.response.status_code}")
+#             wait_time = backoff_factor * (2 ** attempt)  # Exponential backoff
+#             logger.info(f"Retrying in {wait_time} seconds...")
+#             time.sleep(wait_time)
+#         except HTTPError as http_err:
+#             logger.error(f"HTTP error occurred: {http_err}")
+#             # Handle specific status codes if needed
+#             if http_err.response is not None:
+#                 if http_err.response.status_code == 404:
+#                     logger.error("Resource not found.")
+#                     break
+#                 if http_err.response.status_code in [401, 403]:
+#                     logger.error("Authorization Error. Please check the given credentials.")
+#                     break
+#                 elif http_err.response.status_code == 500:
+#                     logger.error("Server error.")
+#                     break
+#         except RequestException as req_err:
+#             logger.error(f"An error occurred: {req_err}")
+#             break
+#         else:
+#             # logger.info(f"Seems okay. ")
+#             # If no exceptions were raised, return the response
+#             return "Ok"
+#     return None   
+
+
+def fetch_url(url: str, data: Optional[dict] = None, headers: Optional[dict] = None, retries: int = 3, backoff_factor: float = 0.3) -> Any:
+    client = httpx.Client()
+    
+    try:
+        for attempt in range(retries):
+            try:
+                response = client.post(
+                    url=url,
+                    data=data,
+                    headers=headers,
+                )
+                response.raise_for_status()  # Raise an exception for HTTP error responses
+                return "Ok"  # If no exceptions were raised, return "Ok"
+            except (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError, httpx.RemoteProtocolError) as trans_err:
+                logger.error(f"Transient error occurred: {trans_err}.")
+                if attempt < retries - 1:  # Don't sleep on the last attempt
+                    wait_time = backoff_factor * (2 ** attempt)  # Exponential backoff
+                    logger.info(f"Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error("Max retries reached. Giving up.")
+            except httpx.HTTPStatusError as http_err:
+                logger.error(f"HTTP error occurred: {http_err}")
+                # Handle specific status codes if needed
                 if http_err.response.status_code == 404:
                     logger.error("Resource not found.")
-                    break
-                if http_err.response.status_code in [401, 403]:
+                elif http_err.response.status_code in [401, 403]:
                     logger.error("Authorization Error. Please check the given credentials.")
-                    break
                 elif http_err.response.status_code == 500:
                     logger.error("Server error.")
-                    break
-        except RequestException as req_err:
-            logger.error(f"An error occurred: {req_err}")
-            break
-        else:
-            # logger.info(f"Seems okay. ")
-            # If no exceptions were raised, return the response
-            return "Ok"
-    return None   
-
-
+                break  # Exit the retry loop for HTTP errors
+            except httpx.RequestError as req_err:
+                logger.error(f"An error occurred: {req_err}")
+                break  # Exit the retry loop for general request errors
+    finally:
+        client.close()
+    
+    return None  # If we've exhausted all retries or encountered a non-retryable error
 
 def upload_dicom_segmentaton(file_path: str, studyInstanceUID: str, segmentationType: str = "zone") -> None:
     assert segmentationType in ['zone', 'lesion']
@@ -169,39 +207,48 @@ def upload_dicom_file(data: bytes):
 def upload_dicoms(sequence_map, orthanc_client):
     # os.makedirs(target_dir, exist_ok=True)
     l = []
-    for row in tqdm(sequence_map.to_dict('records')[762:]):
-        study_info = orthanc_client.get_studies_id(row['study_orthanc_id'])
-        study_instanceUID = study_info['MainDicomTags']['StudyInstanceUID']
-        
-        study_orthanc_id = row['study_orthanc_id']
-        d = {
-            "study_orthanc_id": study_orthanc_id, 
-            "StudyInstanceUID": study_instanceUID,
-        }
-        l.append(d)
-        print("study:", study_instanceUID)
-        
-        with memory_tempfile.MemoryTempfile().TemporaryDirectory() as temp_dir:
-            for seq in ['t2w_tra_id', 't2w_sag_id', 'dwi_tra_id', 'adc_tra_id']:
-            # for seq in ['t2w_tra_id', 't2w_sag_id', 'adc_tr/a_id']:
-                series_oid = row[seq]
-                # print("Writing: ", series_oid)
-                if not isinstance(series_oid, float):
-                    if "," in series_oid:
-                        series_oids = series_oid.split(",")
-                    else:
-                        series_oids = [series_oid]
-                    for series_oid in series_oids:
-                        instances = orthanc_client.get_series_id(series_oid)['Instances']
-                        instances_bar = tqdm(instances)
-                        for instance_id in instances_bar:
-                            # print(instance_id, flush=True)
-                            dicom = Instance(instance_id, orthanc_client).get_pydicom()
-                            ds = anonymize_single_dicom(dicom)
-                            #  Create some temporary filename
-                            filename = os.path.join(temp_dir, f"{instance_id}.dcm")
-                            ds.save_as(filename)
-                            upload_dicom_file(read_file(filename))
+    for row in tqdm(sequence_map.to_dict('records')[214+57:]):
+        try:
+            study_info = orthanc_client.get_studies_id(row['study_orthanc_id'])
+            study_instanceUID = study_info['MainDicomTags']['StudyInstanceUID']
+            
+            study_orthanc_id = row['study_orthanc_id']
+            d = {
+                "study_orthanc_id": study_orthanc_id, 
+                "StudyInstanceUID": study_instanceUID,
+            }
+            l.append(d)
+            print("study:", study_instanceUID)
+            
+            with memory_tempfile.MemoryTempfile().TemporaryDirectory() as temp_dir:
+                for seq in ['t2w_tra_id', 't2w_sag_id', 'dwi_tra_id', 'adc_tra_id']:
+                # for seq in ['t2w_tra_id', 't2w_sag_id', 'adc_tr/a_id']:
+                    series_oid = row[seq]
+                    # print("Writing: ", series_oid)
+                    if not isinstance(series_oid, float):
+                        if "," in series_oid:
+                            series_oids = series_oid.split(",")
+                        else:
+                            series_oids = [series_oid]
+                        for series_oid in series_oids:
+                            try:
+                                instances = orthanc_client.get_series_id(series_oid)['Instances']
+                                instances_bar = tqdm(instances)
+                                for instance_id in instances_bar:
+                                    try:
+                                        # print(instance_id, flush=True)
+                                        dicom = Instance(instance_id, orthanc_client).get_pydicom()
+                                        ds = anonymize_single_dicom(dicom)
+                                        #  Create some temporary filename
+                                        filename = os.path.join(temp_dir, f"{instance_id}.dcm")
+                                        ds.save_as(filename)
+                                        upload_dicom_file(read_file(filename))
+                                    except Exception as e:
+                                        print(f"Error processing instance {instance_id}: {str(e)}")
+                            except Exception as e:
+                                    print(f"Error processing series {series_oid}: {str(e)}")
+        except Exception as e:
+            print(f"Error processing study {row['study_orthanc_id']}: {str(e)}")
 
 
 def get_files(path: str) -> List:
@@ -242,7 +289,8 @@ if __name__ == "__main__":
     orthanc_client = get_orthanc_client()
     sequence_map = pd.read_csv("/home/oleksii/projects/ohif-orthanc-postgres-docker/sequence_mapping/sequence_mapping_13681_studies_20240807.csv", sep=";")        
     # predice_cases = "/data/oleksii/Prostate-Lesion-Datasets-NRRDS/ALTA-Lesion-Dataset-batch-anno-Segmentation-AI/"
-    predice_cases = "/data/oleksii/Prostate-Lesion-Datasets-NRRDS/ALTA-Lesion-Dataset-batch-anno-20240819-AI-pred/"
+    # predice_cases = "/data/oleksii/Prostate-Lesion-Datasets-NRRDS/ALTA-Lesion-Dataset-batch-anno-20240819-AI-pred/"
+    predice_cases = "/data/oleksii/Prostate-Lesion-Datasets-NRRDS/ALTA-Lesion-Dataset-batch-anno-20240819-1340-AI-pred/"
     segms = get_segmentations_with_softmax(predice_cases)
     
     # upload dicoms
@@ -251,12 +299,15 @@ if __name__ == "__main__":
     # to preserve order
     segms_tmp = pd.merge(sequence_map_filtered, segms, how="left", on='study_orthanc_id')
 
-    failed_cases = pd.read_csv("/home/oleksii/projects/ohif-orthanc-postgres-docker/failed_20240821114725_0.csv", sep=";")
-    # failed_cases = failed_cases[failed_cases['type'] == 'heatmap']
-    failed_cases = failed_cases[failed_cases['type'] == 'lesion']
-    segms_tmp = segms_tmp[segms_tmp['study_orthanc_id'].isin(failed_cases['study_orthanc_id'])]
+    # failed_cases = pd.read_csv("/home/oleksii/projects/ohif-orthanc-postgres-docker/failed_20240821114725_0.csv", sep=";")
+    # # failed_cases = failed_cases[failed_cases['type'] == 'heatmap']
+    # failed_cases = failed_cases[failed_cases['type'] == 'lesion']
+    # segms_tmp = segms_tmp[segms_tmp['study_orthanc_id'].isin(failed_cases['study_orthanc_id'])]
     print()
+    
     # upload_dicoms(sequence_map_filtered, orthanc_client)
+    # segms_tmp = segms_tmp.head(214+57)
+    segms_tmp = segms_tmp.tail(len(segms_tmp) - (214+57))
 
     failed = []
     for i, data in tqdm(segms_tmp.iterrows()):
@@ -264,13 +315,13 @@ if __name__ == "__main__":
         logging.info(f"Uploading case | {study_info['MainDicomTags']['StudyInstanceUID']} | {data['study_orthanc_id']} |")
         
         # upload segmentations  
-        # if data['zone']:
-        #     time.sleep(1)
-        #     response = upload_dicom_segmentaton(data['zone'], studyInstanceUID=study_info['MainDicomTags']['StudyInstanceUID'], segmentationType="zone")
-        #     if response is None:
-        #         failed.append({"StudyInstanceUID": study_info['MainDicomTags']['StudyInstanceUID'], "study_orthanc_id": data['study_orthanc_id'], "type": "zone"})
-        # else:
-            # logging.info("Skipping zone...")
+        if data['zone']:
+            time.sleep(1)
+            response = upload_dicom_segmentaton(data['zone'], studyInstanceUID=study_info['MainDicomTags']['StudyInstanceUID'], segmentationType="zone")
+            if response is None:
+                failed.append({"StudyInstanceUID": study_info['MainDicomTags']['StudyInstanceUID'], "study_orthanc_id": data['study_orthanc_id'], "type": "zone"})
+        else:
+            logging.info("Skipping zone...")
         
         if data['lesion']:
             response = upload_dicom_segmentaton(data['lesion'], studyInstanceUID=study_info['MainDicomTags']['StudyInstanceUID'],  segmentationType="lesion")
@@ -281,14 +332,14 @@ if __name__ == "__main__":
         else:
             logging.info("Skipping lesion...")
         
-        # if data['softmax']:
-        #     response = upload_heatmap(data['softmax'], studyInstanceUID=study_info['MainDicomTags']['StudyInstanceUID'])
-        #     if response is None:
-        #         failed.append({"StudyInstanceUID": study_info['MainDicomTags']['StudyInstanceUID'], "study_orthanc_id": data['study_orthanc_id'], "type": "heatmap"})
+        if data['softmax']:
+            response = upload_heatmap(data['softmax'], studyInstanceUID=study_info['MainDicomTags']['StudyInstanceUID'])
+            if response is None:
+                failed.append({"StudyInstanceUID": study_info['MainDicomTags']['StudyInstanceUID'], "study_orthanc_id": data['study_orthanc_id'], "type": "heatmap"})
                 
-        #     time.sleep(1)
-        # else: 
-        #     logging.info("Skipping softmax...")
+            time.sleep(1)
+        else: 
+            logging.info("Skipping softmax...")
         
     df = pd.DataFrame(failed)
     timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
